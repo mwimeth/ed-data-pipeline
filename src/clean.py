@@ -193,6 +193,51 @@ def apply_reject_rules(df: DataFrame):
     return clean_df, rejects_df
 
 
+def build_dq_report(rejects_df, total_input_rows: int):
+    """Step 7a: summarise how many rows failed each rule, and what
+    share of the input that represents. This is the report that would
+    be escalated to whoever owns the source data."""
+    report = (
+        rejects_df.select(F.explode("failure_reasons").alias("reason"))
+        .groupBy("reason")
+        .count()
+        .withColumn("pct_of_input", F.round(F.col("count") / F.lit(total_input_rows) * 100, 2))
+        .orderBy(F.desc("count"))
+    )
+    return report
+
+########### Milestone 9: check rejects against the answer key ###########
+def check_against_answer_key(rejects_df, spark: SparkSession):
+    """Step 7b: compare our rejected attendance_ids against the answer
+    key that generate_data.py produced, to prove our rules caught
+    exactly the errors that were planted (no more, no fewer)."""
+    reject_rule_names = [
+        "missing_arrival_time", "missing_departure_time",
+        "departure_before_arrival", "invalid_triage_code",
+        "future_dated_attendance", "extreme_length_of_stay",
+        "missing_patient_id",
+    ]
+
+    key = spark.read.csv(
+        "data/answer_key/injected_errors_log.csv", header=True, inferSchema=False
+    )
+    key_reject_ids = (
+        key.filter(F.col("error_type").isin(reject_rule_names))
+        .select("attendance_id").distinct()
+    )
+
+    my_reject_ids = rejects_df.select("attendance_id").distinct()
+
+    matched = my_reject_ids.intersect(key_reject_ids).count()
+    only_mine = my_reject_ids.subtract(key_reject_ids).count()
+    only_key = key_reject_ids.subtract(my_reject_ids).count()
+
+    print(f"Answer key reject IDs: {key_reject_ids.count()}")
+    print(f"My reject IDs: {my_reject_ids.count()}")
+    print(f"Matched (expect equal to both above): {matched}")
+    print(f"I rejected but key didn't (expect 0): {only_mine}")
+    print(f"Key rejected but I didn't (expect 0): {only_key}")
+
 
 if __name__ == "__main__":
 
@@ -263,5 +308,14 @@ if __name__ == "__main__":
     print("\nRejects by reason (a row can have more than one reason):")
     rejects_df.select(F.explode("failure_reasons").alias("reason")) \
         .groupBy("reason").count().orderBy(F.desc("count")).show(truncate=False)
+
+
+    report = build_dq_report(rejects_df, step5.count())
+    print("\nData quality report:")
+    report.show(truncate=False)
+
+    print("Checking rejects against the answer key:")
+    check_against_answer_key(rejects_df, spark)
+
     
     spark.stop()
