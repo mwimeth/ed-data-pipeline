@@ -104,6 +104,49 @@ def parse_dates(df: DataFrame) -> DataFrame:
     return df
 
 
+########## Milestone 6:Fix triage code, GP codes and fill missing complaints / dispositions #########
+GP_CODE_PATTERN = r"^[A-Z]\d{5}$"  # one capital letter followed by 5 digits
+
+
+def fix_triage_and_gp_codes(df: DataFrame) -> DataFrame:
+    """Step 4:
+    - triage_category: strip a trailing '.0' (e.g. '3.0' -> '3'), keep as string for now
+      (we'll validate it's a real 1-5 value in the reject-rules step later)
+    - gp_practice_code: upper-case it, then check it matches the expected
+      pattern; anything that doesn't match becomes null, with a flag column
+      recording that it was corrected/rejected
+    - presenting_complaint / disposition: fill missing with 'Unknown'
+      (these are recoverable - we don't want to reject a whole row just
+      because this one field was blank)
+    """
+    df = df.withColumn(
+        "triage_category",
+        F.regexp_replace(F.col("triage_category"), r"\.0$", ""),
+    )
+
+    upper_gp = F.upper(F.col("gp_practice_code"))
+    df = df.withColumn(
+        "gp_code_flag",
+        F.when(F.col("gp_practice_code").isNull(), F.lit("missing"))
+         .when(~upper_gp.rlike(GP_CODE_PATTERN), F.lit("malformed"))
+         .otherwise(F.lit(None)),
+    )
+    df = df.withColumn(
+        "gp_practice_code",
+        F.when(upper_gp.rlike(GP_CODE_PATTERN), upper_gp).otherwise(F.lit(None)),
+    )
+
+    df = df.withColumn(
+        "presenting_complaint",
+        F.coalesce(F.col("presenting_complaint"), F.lit("Unknown")),
+    )
+    df = df.withColumn(
+        "disposition",
+        F.coalesce(F.col("disposition"), F.lit("Unknown")),
+    )
+
+    return df
+
 if __name__ == "__main__":
     spark = get_spark()
 
@@ -142,4 +185,18 @@ if __name__ == "__main__":
           step3.filter(F.col("departure_time").isNull()).count())
 
 
+    step4 = fix_triage_and_gp_codes(step3)
+
+    print("\nTriage values still ending in '.0' (expect 0):",
+          step4.filter(F.col("triage_category").rlike(r"\.0$")).count())
+
+    print("GP code flag counts:")
+    step4.groupBy("gp_code_flag").count().show()
+
+    print("Presenting complaint nulls after fill (expect 0):",
+          step4.filter(F.col("presenting_complaint").isNull()).count())
+    print("Disposition nulls after fill (expect 0):",
+          step4.filter(F.col("disposition").isNull()).count())
+
+    
     spark.stop()
