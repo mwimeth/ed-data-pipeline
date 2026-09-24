@@ -147,7 +147,18 @@ def fix_triage_and_gp_codes(df: DataFrame) -> DataFrame:
 
     return df
 
+############ Milestone 7: remove exact duplicate rows ############
+
+def remove_duplicates(df: DataFrame) -> DataFrame:
+    """Step 5: remove exact duplicate rows, keeping the first occurrence
+    of each attendance_id. The raw data has 350 rows that are exact
+    copies of another row further up the file."""
+    return df.dropDuplicates(["attendance_id"])
+
+
 if __name__ == "__main__":
+
+    
     spark = get_spark()
 
     raw = read_raw(spark)
@@ -197,6 +208,14 @@ if __name__ == "__main__":
           step4.filter(F.col("presenting_complaint").isNull()).count())
     print("Disposition nulls after fill (expect 0):",
           step4.filter(F.col("disposition").isNull()).count())
+
+    
+    step5 = remove_duplicates(step4)
+    print("\nRow count before removing duplicates:", step4.count())
+    print("Row count after removing duplicates (expect 20000):", step5.count())
+    print("Distinct attendance_ids after dedupe (expect 20000):",
+          step5.select("attendance_id").distinct().count())
+
 
     
     spark.stop()
