@@ -49,7 +49,7 @@ def count_nulls(df: DataFrame) -> DataFrame:
     return df.select(
         [F.sum(F.col(c).isNull().cast("int")).alias(c) for c in df.columns]
     )
-
+############ Milestone 4: standardise text columns ############
 COMPLAINTS = [
     "Abdominal pain", "Chest pain", "Shortness of breath",
     "Minor injury - limb", "Head injury", "Fall", "Laceration / wound",
@@ -84,6 +84,26 @@ def standardise_text(df: DataFrame) -> DataFrame:
     return df
 
 
+######### Milestone 5: check that the cleaned data is as expected #########
+DATE_FORMATS = [
+    "yyyy-MM-dd HH:mm:ss",
+    "dd/MM/yyyy HH:mm",
+    "dd-MMM-yyyy HH:mm",
+    "yyyy-MM-dd'T'HH:mm:ss",
+]
+
+
+def parse_dates(df: DataFrame) -> DataFrame:
+    """Step 3: parse arrival_time and departure_time, trying each known
+    format until one works. Coalesce picks the first non-null result."""
+    for column in ["arrival_time", "departure_time"]:
+        parsed_attempts = [
+            F.try_to_timestamp(F.col(column), F.lit(fmt)) for fmt in DATE_FORMATS
+        ]
+        df = df.withColumn(column, F.coalesce(*parsed_attempts))
+    return df
+
+
 if __name__ == "__main__":
     spark = get_spark()
 
@@ -113,5 +133,13 @@ if __name__ == "__main__":
         (~F.col("presenting_complaint").isin(COMPLAINTS)) & F.col("presenting_complaint").isNotNull()
     ).count()
     print("Complaint values that didn't match the reference list (expect 0):", unmatched)
+
+    step3 = parse_dates(step2)
+
+    print("\nArrival timestamps null after parsing (expect 100, same as before parsing):",
+          step3.filter(F.col("arrival_time").isNull()).count())
+    print("Departure timestamps null after parsing (expect 200, same as before parsing):",
+          step3.filter(F.col("departure_time").isNull()).count())
+
 
     spark.stop()
