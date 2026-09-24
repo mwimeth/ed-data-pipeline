@@ -156,6 +156,44 @@ def remove_duplicates(df: DataFrame) -> DataFrame:
     return df.dropDuplicates(["attendance_id"])
 
 
+############ Milestone 8: reject rules ############
+
+def apply_reject_rules(df: DataFrame):
+    """Step 6: check each row against 7 reject rules. Any row that fails
+    at least one rule goes to 'rejects' (with the reasons recorded);
+    everything else goes to 'clean'. Returns (clean_df, rejects_df)."""
+
+    valid_triage = F.col("triage_category").isin(["1", "2", "3", "4", "5"])
+    both_times_present = F.col("arrival_time").isNotNull() & F.col("departure_time").isNotNull()
+    length_of_stay_min = (
+        F.col("departure_time").cast("long") - F.col("arrival_time").cast("long")
+    ) / 60
+
+    all_checks = F.array(
+        F.when(F.col("arrival_time").isNull(), F.lit("missing_arrival_time")),
+        F.when(F.col("departure_time").isNull(), F.lit("missing_departure_time")),
+        F.when(both_times_present & (F.col("departure_time") < F.col("arrival_time")),
+               F.lit("departure_before_arrival")),
+        F.when(~valid_triage, F.lit("invalid_triage_code")),
+        F.when(F.col("arrival_time").isNotNull() &
+               ((F.year("arrival_time") < 2025) | (F.year("arrival_time") >= 2026)),
+               F.lit("future_dated_attendance")),
+        F.when(both_times_present & (length_of_stay_min > 2880),
+               F.lit("extreme_length_of_stay")),
+        F.when(F.col("pseudo_patient_id").isNull(), F.lit("missing_patient_id")),
+    )
+    df = df.withColumn(
+        "failure_reasons",
+        F.filter(all_checks, lambda x: x.isNotNull()),
+    )
+
+    clean_df = df.filter(F.size(F.col("failure_reasons")) == 0).drop("failure_reasons")
+    rejects_df = df.filter(F.size(F.col("failure_reasons")) > 0)
+
+    return clean_df, rejects_df
+
+
+
 if __name__ == "__main__":
 
     
@@ -217,5 +255,13 @@ if __name__ == "__main__":
           step5.select("attendance_id").distinct().count())
 
 
+    clean_df, rejects_df = apply_reject_rules(step5)
+
+    print("\nClean rows (expect 19150):", clean_df.count())
+    print("Rejected rows (expect 850):", rejects_df.count())
+
+    print("\nRejects by reason (a row can have more than one reason):")
+    rejects_df.select(F.explode("failure_reasons").alias("reason")) \
+        .groupBy("reason").count().orderBy(F.desc("count")).show(truncate=False)
     
     spark.stop()
