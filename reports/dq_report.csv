@@ -1,0 +1,8 @@
+reason,count,pct_of_input
+departure_before_arrival,200,1.0
+missing_departure_time,200,1.0
+invalid_triage_code,200,1.0
+missing_arrival_time,100,0.5
+extreme_length_of_stay,60,0.3
+missing_patient_id,60,0.3
+future_dated_attendance,30,0.15
